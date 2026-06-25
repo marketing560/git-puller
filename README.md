@@ -25,7 +25,7 @@ git reset --hard origin/<branch>
 git clean -fd
 ```
 
-Each repository must contain a valid WordPress plugin file with a plugin header. After the pull, Git Puller detects that plugin file, deactivates it if active, and activates it again so database migrations and activation hooks can run.
+Each repository must contain a valid WordPress plugin file with a plugin header. After the pull, Git Puller detects that plugin file, deactivates it if active, and activates it again so database migrations and activation hooks can run. The projects table also shows the last deployed commit hash and subject for each plugin.
 
 ## Notes
 

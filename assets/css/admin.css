@@ -52,6 +52,7 @@
 .git-puller td small {
     display: block;
     max-width: 340px;
+    margin-top: 4px;
 }
 
 .git-puller-actions {

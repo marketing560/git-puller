@@ -36,6 +36,8 @@ class Git_Puller
                 branch_name VARCHAR(191) NOT NULL,
                 local_path TEXT NOT NULL,
                 plugin_file VARCHAR(255) DEFAULT '' NOT NULL,
+                last_commit_hash VARCHAR(40) DEFAULT '' NOT NULL,
+                last_commit_subject TEXT NOT NULL,
                 last_status VARCHAR(20) DEFAULT 'created' NOT NULL,
                 last_message TEXT NOT NULL,
                 last_pulled_at DATETIME NULL,
@@ -46,15 +48,25 @@ class Git_Puller
                 KEY last_status (last_status)
             ) {$charset_collate};"
         );
+
+        update_option('git_puller_db_version', GIT_PULLER_VERSION);
     }
 
     private function __construct()
     {
+        add_action('admin_init', [$this, 'maybe_upgrade_schema']);
         add_action('admin_menu', [$this, 'register_admin_page']);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
         add_action('admin_post_git_puller_add_project', [$this, 'handle_add_project']);
         add_action('admin_post_git_puller_pull_project', [$this, 'handle_pull_project']);
         add_action('admin_post_git_puller_delete_project', [$this, 'handle_delete_project']);
+    }
+
+    public function maybe_upgrade_schema(): void
+    {
+        if (get_option('git_puller_db_version') !== GIT_PULLER_VERSION) {
+            self::activate();
+        }
     }
 
     public function register_admin_page(): void
@@ -140,6 +152,7 @@ class Git_Puller
                                 <th><?php esc_html_e('Branch', 'git-puller'); ?></th>
                                 <th><?php esc_html_e('Local Path', 'git-puller'); ?></th>
                                 <th><?php esc_html_e('Plugin File', 'git-puller'); ?></th>
+                                <th><?php esc_html_e('Last Deployed Commit', 'git-puller'); ?></th>
                                 <th><?php esc_html_e('Status', 'git-puller'); ?></th>
                                 <th><?php esc_html_e('Last Pull', 'git-puller'); ?></th>
                                 <th><?php esc_html_e('Actions', 'git-puller'); ?></th>
@@ -155,6 +168,16 @@ class Git_Puller
                                     <td><?php echo esc_html($project->branch_name); ?></td>
                                     <td><code><?php echo esc_html($project->local_path); ?></code></td>
                                     <td><?php echo $project->plugin_file ? '<code>' . esc_html($project->plugin_file) . '</code>' : '&mdash;'; ?></td>
+                                    <td>
+                                        <?php if (!empty($project->last_commit_hash)) : ?>
+                                            <code><?php echo esc_html(substr($project->last_commit_hash, 0, 12)); ?></code>
+                                            <?php if (!empty($project->last_commit_subject)) : ?>
+                                                <small><?php echo esc_html($project->last_commit_subject); ?></small>
+                                            <?php endif; ?>
+                                        <?php else : ?>
+                                            &mdash;
+                                        <?php endif; ?>
+                                    </td>
                                     <td>
                                         <span class="git-puller-status git-puller-status-<?php echo esc_attr($project->last_status); ?>">
                                             <?php echo esc_html($project->last_status); ?>
@@ -215,7 +238,8 @@ class Git_Puller
                 throw new RuntimeException(__('Repository cloned, but no WordPress plugin file was found in it.', 'git-puller'));
             }
 
-            $this->insert_project($repo_url, $branch_name, $local_path, $plugin_file, 'cloned', __('Repository cloned successfully.', 'git-puller'));
+            $commit = $this->get_deployed_commit($local_path);
+            $this->insert_project($repo_url, $branch_name, $local_path, $plugin_file, $commit, 'cloned', __('Repository cloned successfully.', 'git-puller'));
             $this->redirect_with_notice('success', __('Project cloned and added.', 'git-puller'));
         } catch (Throwable $e) {
             $this->redirect_with_notice('error', $e->getMessage());
@@ -281,7 +305,8 @@ class Git_Puller
             $this->reactivate_plugin($plugin_file);
         }
 
-        $this->mark_project($project->id, 'pulled', __('Force pull completed.', 'git-puller'), $plugin_file, true);
+        $commit = $this->get_deployed_commit($project->local_path);
+        $this->mark_project($project->id, 'pulled', __('Force pull completed.', 'git-puller'), $plugin_file, true, $commit);
     }
 
     private function reactivate_plugin(string $plugin_file): void
@@ -354,7 +379,22 @@ class Git_Puller
         return $relative_dir . '/' . $plugin_files[0];
     }
 
-    private function insert_project(string $repo_url, string $branch_name, string $local_path, string $plugin_file, string $status, string $message): void
+    private function get_deployed_commit(string $local_path): array
+    {
+        $result = $this->run_git(['-C', $local_path, 'log', '-1', '--format=%H%n%s']);
+        if ($result['code'] !== 0) {
+            throw new RuntimeException($result['output']);
+        }
+
+        $lines = preg_split('/\r\n|\r|\n/', trim($result['output']), 2);
+
+        return [
+            'hash' => $lines[0] ?? '',
+            'subject' => $lines[1] ?? '',
+        ];
+    }
+
+    private function insert_project(string $repo_url, string $branch_name, string $local_path, string $plugin_file, array $commit, string $status, string $message): void
     {
         global $wpdb;
 
@@ -367,16 +407,18 @@ class Git_Puller
                 'branch_name' => $branch_name,
                 'local_path' => $local_path,
                 'plugin_file' => $plugin_file,
+                'last_commit_hash' => $commit['hash'],
+                'last_commit_subject' => $commit['subject'],
                 'last_status' => $status,
                 'last_message' => $message,
                 'created_at' => $now,
                 'updated_at' => $now,
             ],
-            ['%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s']
+            ['%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s']
         );
     }
 
-    private function mark_project(int $project_id, string $status, string $message, ?string $plugin_file = null, bool $pulled = false): void
+    private function mark_project(int $project_id, string $status, string $message, ?string $plugin_file = null, bool $pulled = false, ?array $commit = null): void
     {
         global $wpdb;
 
@@ -389,6 +431,13 @@ class Git_Puller
 
         if ($plugin_file !== null) {
             $data['plugin_file'] = $plugin_file;
+            $format[] = '%s';
+        }
+
+        if ($commit !== null) {
+            $data['last_commit_hash'] = $commit['hash'];
+            $data['last_commit_subject'] = $commit['subject'];
+            $format[] = '%s';
             $format[] = '%s';
         }
 
