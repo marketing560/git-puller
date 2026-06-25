@@ -1,0 +1,71 @@
+.git-puller .git-puller-panel {
+    margin: 18px 0;
+    padding: 18px;
+    max-width: 1180px;
+    background: #fff;
+    border: 1px solid #dcdcde;
+}
+
+.git-puller-form {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(160px, 260px) auto;
+    gap: 14px;
+    align-items: end;
+}
+
+.git-puller-form label {
+    display: grid;
+    gap: 6px;
+    font-weight: 600;
+}
+
+.git-puller-form input[type='url'],
+.git-puller-form input[type='text'] {
+    width: 100%;
+}
+
+.git-puller-table code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.git-puller-status {
+    display: inline-block;
+    margin-bottom: 4px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: #f0f0f1;
+    font-weight: 600;
+}
+
+.git-puller-status-pulled,
+.git-puller-status-cloned {
+    color: #0a4b20;
+    background: #d1e7dd;
+}
+
+.git-puller-status-error {
+    color: #8a2424;
+    background: #f8d7da;
+}
+
+.git-puller td small {
+    display: block;
+    max-width: 340px;
+}
+
+.git-puller-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.git-puller-actions form {
+    margin: 0;
+}
+
+@media (max-width: 900px) {
+    .git-puller-form {
+        grid-template-columns: 1fr;
+    }
+}
